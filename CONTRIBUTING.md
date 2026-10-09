@@ -1,6 +1,7 @@
 # Contributing
 
 ## Before you start
+- Read [AGENTS.md](./AGENTS.md) (rules for humans and AI agents alike) and the specs in [docs/spec/](./docs/spec/).
 - Check [ROADMAP.md](./ROADMAP.md) and open issues. Big changes: open an issue first.
 - One PR = one concern.
 

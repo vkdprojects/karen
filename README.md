@@ -126,7 +126,9 @@ crates/karen-core/     # domain types, scheduler, IPAM
 plugins/storage/*      # lvm-thin, ceph
 plugins/network/*      # routed, ovn
 plugins/billing/*      # whmcs, blesta, paymenter bridges
-docs/                  # ARCHITECTURE.md, research/
+api/openapi.yaml       # REST contract (source of truth)
+docs/                  # ARCHITECTURE.md, spec/, research/
+AGENTS.md, .agents/    # rules and playbooks for AI coding agents
 ```
 
 ## Contributing

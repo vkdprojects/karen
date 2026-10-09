@@ -2,6 +2,8 @@
 
 Design decisions for KAREN, backed by the research in [`docs/research/`](./research/). Pre-alpha: this describes the target, not running code.
 
+Behaviour (data model, state machines, task queue, API contracts, security, configuration, metrics, abuse, operations, testing) is specified in [`docs/spec/`](./spec/).
+
 ## Products
 
 | SKU | What's sold | Runtime | Storage | Network mode |
@@ -45,6 +47,7 @@ flowchart LR
 3. Every network mode enforces anti-spoof. No mode ships without it.
 4. No proprietary or AGPL code is linked. External AGPL/GPL tools (PBS, FastNetMon) are talked to over a protocol only.
 5. Nested virtualization is off unless the SKU opts in.
+6. Policy is configuration: thresholds, actions, notifications, overcommit and retention are settings with neutral defaults ([spec/CONFIGURATION.md](./spec/CONFIGURATION.md)). Only safety invariants are hard-coded.
 
 ## Compute
 
