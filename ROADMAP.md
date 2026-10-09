@@ -45,6 +45,7 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - [ ] Admin UI: version drift per node; "no disk redundancy" flag; plan option `require_disk_redundancy`
 
 ## v0.4 — Multi-node + OVN
+- [ ] KAREN apt repository: CI builds and signs latest upstream OVS + OVN for Ubuntu 26.04
 - [ ] Scheduler (capacity, groups, tags, storage class; stops placing at 85 % thin-pool data/metadata)
 - [ ] OVN mode: `port_security`, **same `FirewallPolicy` compiled to OVN ACLs / Port_Groups / Address_Sets**, ACL logging with meter, VPC over Geneve, NAT, VLAN localnet, qos + pps meters
 - [ ] Firewall and graph parity tests between `routed` and `ovn`

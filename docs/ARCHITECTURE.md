@@ -83,7 +83,7 @@ Exactly two modes. VLAN is OVN `localnet`, NAT is OVN NAT; there is no third cod
 | Mode | When | Dataplane | Anti-spoof |
 |---|---|---|---|
 | `routed` | P0, single node, behind Hetzner/OVH-style upstreams | Per-VM tap, static `/32` + routed `/64`, proxy ARP/NDP, `tc` police. No Linux bridge, no MacVTap | nftables `netdev` ingress on each tap |
-| `ovn` | P1+, multi-node | OVS 3.7 LTS kernel datapath + OVN 26.03 + FRR (Ubuntu archive); Geneve VPC; `qos_max_rate` + pps meters | OVN `port_security` |
+| `ovn` | P1+, multi-node | OVS kernel datapath + OVN + FRR, latest upstream stable (see [Host platform](#host-platform)); Geneve VPC; `qos_max_rate` + pps meters | OVN `port_security` |
 
 ```mermaid
 flowchart LR
@@ -293,7 +293,7 @@ pub enum LocalLayout {
 | `raid1` / `raid10` | 2 TB / half of raw | Survived | Use when budget allows |
 | `raid5` | (n−1) × disk | Survived | Write penalty; avoid for write-heavy plans |
 
-- RAID is software (mdadm): NVMe on HPE Gen9/Gen10 is not behind the Smart Array controller.
+- RAID is software (mdadm); NVMe drives are usually not behind a hardware RAID controller.
 - Layouts without redundancy (`jbod`, `raid0`) are flagged "no disk redundancy" in the admin UI. A plan may set `require_disk_redundancy = true`; the scheduler then only uses `raid1`/`raid10`/`raid5` nodes. Default `false`.
 - The scheduler treats each `jbod` pool as its own capacity bucket, with the thin-pool limits above applied per pool.
 
@@ -322,7 +322,15 @@ Suggested pairing (CPU classes are separate plan fields):
 | Kernel HWE | `linux-generic-hwe-26.04` | New kernel from each interim release, starting with 26.04.2 (early 2027, 26.10's kernel) |
 | Virtualization HWE | `qemu-hwe`, `libvirt-hwe`, `edk2-hwe` (OVMF), `seabios-hwe`; switched as one unit with `ubuntu-helper-virt-hwe` | Every 6 months for the first 2 years of the LTS (from 26.04.1), then frozen until the move to 28.04 LTS |
 
-OVS, OVN and FRR come from the Ubuntu 26.04 archive (OVS 3.7 is the upstream LTS line). No KAREN-built packages.
+**Network stack: always the latest upstream stable**, not the older versions in the Ubuntu archive:
+
+| Component | Source | Built by |
+|---|---|---|
+| Open vSwitch | Upstream release tarballs | KAREN CI → KAREN apt repository for Ubuntu 26.04 |
+| OVN | Upstream release tarballs | KAREN CI → KAREN apt repository |
+| FRR | Official FRR apt repository (`deb.frrouting.org`) | FRR project; KAREN CI builds it only if a release is missing for 26.04 |
+
+KAREN-built packages are versioned, signed, and follow the update policy below. KAREN owns their security updates: an upstream security release is rebuilt and published the same day.
 
 ### Versions (checked 2026-10-09)
 
@@ -331,9 +339,9 @@ OVS, OVN and FRR come from the Ubuntu 26.04 archive (OVS 3.7 is the upstream LTS
 | Kernel | 7.0 | 26.04.2: 26.10's kernel (expected 7.2) | 7.2.x stable; 7.3 due late Oct 2026 |
 | QEMU | 10.2.1 | Next virt-HWE refresh (expected 11.x) | 11.1.x |
 | libvirt | 12.0 | Next virt-HWE refresh | 12.6+ |
-| Open vSwitch | 3.7.1 (LTS line) | — | 4.0.0 |
-| OVN | 26.03 | — | 26.09 |
-| FRR | Ubuntu archive | — | 10.7.x |
+| Open vSwitch | 3.7.1 | KAREN apt repo | 4.0.0 |
+| OVN | 26.03 | KAREN apt repo | 26.09 |
+| FRR | Ubuntu archive | FRR apt repo | 10.7.x |
 
 "Expected" values are inferences from the HWE cadence, not published versions. Re-check this table at every HWE refresh.
 
@@ -343,8 +351,6 @@ OVS, OVN and FRR come from the Ubuntu 26.04 archive (OVS 3.7 is the upstream LTS
 2. **New minor/major versions** (each HWE refresh, a new OVN/OVS line, a 28.04 move): run 2–4 weeks on a staging node with real workloads, then roll out node by node.
 3. Every node runs the **same** pinned set of versions for QEMU, libvirt, OVMF, kernel, OVS/OVN/FRR. `karen-agent` reports them on enrollment and on every heartbeat; the admin UI flags nodes that drift from the fleet target.
 4. Live migration only between nodes on the same QEMU major/minor, or from older to newer.
-
-Hardware note: HPE Gen9 and Gen10 (Intel) are PCIe 3.0 and not HPE-certified for Ubuntu 26.04; Gen4 NVMe runs at PCIe 3.0 speed there. Install the OS on SATA/M.2; NVMe is for VM pools. Validate each server generation on a test node before production.
 
 ## Bare metal
 
@@ -380,7 +386,7 @@ flowchart LR
 | App microVMs | Firecracker 1.17+ for the `web` app tier only | [vmm](./research/vmm.md) |
 | Host hardening | Nested off, `/dev/kvm` 0660, livepatch, q35 virtio-only, no `scsi=on` | [vmm](./research/vmm.md) |
 | Network P0 | Routed tap, `/32` + `/64`, proxy ARP/NDP, nftables anti-spoof, `tc` | [networking](./research/networking.md) |
-| Network P1+ | OVS 3.7 LTS + OVN 26.03 + FRR from the Ubuntu archive, BGP unnumbered to host | [networking](./research/networking.md) |
+| Network P1+ | OVS + OVN (KAREN apt repo) + FRR (FRR apt repo), latest upstream stable; BGP unnumbered to host | [networking](./research/networking.md) |
 | Network modes | Exactly two: `routed`, `ovn` | [networking](./research/networking.md) |
 | Network avoid | OVS-DPDK default, AF_XDP, SR-IOV for VPS, SRv6, stretched L2, BBRv3 | [networking](./research/networking.md) |
 | Edge | ≥2 transits, 2× IX.br SP, Routinator, FastNetMon → RTBH/Flowspec, XDP | [networking](./research/networking.md) |
@@ -390,7 +396,7 @@ flowchart LR
 | Storage classes | `local` (LVM-thin on NVMe) and `replicated` (Ceph RBD), one per plan; volumes always `replicated`; HA only with BMC fencing | [storage](./research/storage-metal-web.md) |
 | Local disk layout | Per-node `local_layout` (`jbod` default, `raid0`, `raid1`, `raid10`, `raid5`), never refused; plans may require redundancy | — |
 | Disk format | `raw` on LVM-thin; `qcow2` for templates; qcow2 external data file to be benchmarked for persistent bitmaps | [storage](./research/storage-metal-web.md) |
-| Host OS | Ubuntu 26.04 LTS + kernel HWE + virtualization HWE; OVS/OVN/FRR from the Ubuntu archive | [Ubuntu virt HWE](https://ubuntu.com/server/docs/how-to/virtualisation/virt-hwe/) |
+| Host OS | Ubuntu 26.04 LTS + kernel HWE + virtualization HWE; OVS/OVN from the KAREN apt repo, FRR from its official repo, latest upstream stable | [Ubuntu virt HWE](https://ubuntu.com/server/docs/how-to/virtualisation/virt-hwe/) |
 | Update policy | Point releases auto after CI; new versions after 2–4 weeks on staging; one pinned version set per fleet | — |
 | Backups | Own dirty-bitmap chunked dedup on S3; PBS protocol target only | [storage](./research/storage-metal-web.md) |
 | Metal | Native `karen-metal`: Redfish/IPMI, HTTPS Boot, Rust ramdisk, crypto-erase | [storage](./research/storage-metal-web.md), [providers](./research/providers.md) |
