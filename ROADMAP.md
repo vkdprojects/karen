@@ -13,7 +13,7 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 ## v0.1 — First VM
 - [ ] Agent ↔ control gRPC over mTLS, one-time enrollment token
 - [ ] QEMU via libvirt: create, start, stop, destroy
-- [ ] LVM-thin raw disks
+- [ ] `local` storage class: raw LVs on LVM-thin; agent refuses pools not on NVMe RAID1/10
 - [ ] **Routed tap** networking with nftables `netdev` ingress anti-spoof (always on)
 - [ ] SQLite, admin API token
 - [ ] CLI: `karen vm create|list|start|stop|delete`
@@ -32,7 +32,7 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## v0.3 — Hosting panel (VPS)
 - [ ] Users/RBAC (admin, customer)
-- [ ] Plans, incl. monthly traffic quota and `overage_action: Throttle|Suspend` (default `Throttle` to 10 Mbit/s via `tc` / OVN qos until month rollover)
+- [ ] Plans: storage class, per-disk QoS (`<iotune>` IOPS/bandwidth), backup schedule; monthly traffic quota and `overage_action: Throttle|Suspend` (default `Throttle` to 10 Mbit/s via `tc` / OVN qos until month rollover)
 - [ ] Customer portal: power, reinstall, console, password reset, SSH keys, firewall editor
 - [ ] ISO + Windows (virtio, OVMF, swtpm)
 - [ ] Snapshots
@@ -42,7 +42,7 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - [ ] Incremental backups to S3 (dirty bitmaps, chunked dedup)
 
 ## v0.4 — Multi-node + OVN
-- [ ] Scheduler (capacity, groups, tags)
+- [ ] Scheduler (capacity, groups, tags, storage class; stops placing at 85 % thin-pool data/metadata)
 - [ ] OVN mode: `port_security`, **same `FirewallPolicy` compiled to OVN ACLs / Port_Groups / Address_Sets**, ACL logging with meter, VPC over Geneve, NAT, VLAN localnet, qos + pps meters
 - [ ] Firewall and graph parity tests between `routed` and `ovn`
 - [ ] FRR BGP unnumbered host ↔ leaf
@@ -67,7 +67,9 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - [ ] Hourly billing + credit balance + auto-suspend
 - [ ] Blesta / Paymenter modules, webhooks
 - [ ] Scoped API tokens (rate limit, expiry); 2FA + step-up auth
-- [ ] Ceph RBD volumes
+- [ ] `replicated` storage class: Ceph RBD root disks + detachable volumes
+- [ ] HA restart for `replicated` VMs, only after BMC fencing
+- [ ] Live storage-class conversion (`blockdev-mirror` LVM-thin ↔ RBD)
 - [ ] Cloud Hypervisor Linux tier
 - [ ] Firecracker app tier (scale-to-zero)
 - [ ] i18n: en, pt-BR

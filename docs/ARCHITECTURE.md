@@ -226,6 +226,60 @@ flowchart LR
 
 Sources: [research/storage-metal-web.md](./research/storage-metal-web.md).
 
+### Storage classes
+
+A **class** is what the customer buys (latency, durability). A **backend** is how a node implements it. Every plan names exactly one class for its root disk; the scheduler only places a VM on nodes that offer that class.
+
+| | `local` | `replicated` |
+|---|---|---|
+| For | Game servers, latency-sensitive apps, cheap VPS | Enterprise, HA plans, detachable volumes |
+| Backend | `raw` LV on LVM-thin, local NVMe | Ceph RBD (`size=3`, `min_size=2`, failure domain `host`). LINSTOR/DRBD may back it later |
+| QD1 4k latency | ~50 µs | ~0.5 ms read / ~1 ms write |
+| Disk failure | Survived: pool sits on md RAID1/RAID10 | Survived: Ceph re-replicates |
+| Host failure | VM is down until the host returns, or is restored from its last backup (RPO = backup interval) | VM restarts on another node (HA, after fencing) |
+| Live migration | NBD mirror copies disk + RAM; planned maintenance only | Instant: RAM only, disk is shared |
+| Snapshots | LVM-thin snapshots | RBD snapshots |
+| Detachable volumes | No | Yes (volumes are always `replicated`) |
+| Roadmap | v0.1 | v0.7 |
+
+```rust
+pub enum StorageClass { Local, Replicated }
+
+pub struct DiskQos {             // per disk, from the plan
+    pub read_iops: Option<u32>,
+    pub write_iops: Option<u32>,
+    pub read_bps: Option<u64>,
+    pub write_bps: Option<u64>,
+    pub burst_secs: u16,         // 0 = no burst
+}
+
+pub struct PlanStorage {
+    pub class: StorageClass,
+    pub root_gb: u32,
+    pub qos: DiskQos,
+    pub backup_schedule: Option<BackupSchedule>, // portal warns when None on `local`
+}
+```
+
+Rules:
+1. **Class is fixed by the plan.** A VM's root disk inherits it. Changing class means changing plan; the conversion is a live copy (QEMU `blockdev-mirror` between LVM-thin and RBD), run as a normal idempotent task (v0.7).
+2. **Nodes advertise classes.** The agent reports `local` only if the thin pool sits on md RAID1/RAID10 (or a hardware RAID volume) built from NVMe; a single-disk pool is refused unless the node has `allow_unprotected_local = true` (dev only). `replicated` is reported when the node can open the configured Ceph pool.
+3. **Thin-pool safety (`local`).** A full thin pool freezes or errors every VM on the node, so:
+   - Per-node `max_thin_overcommit` (default `1.0`, i.e. no overcommit; game nodes must keep `1.0`).
+   - The scheduler stops placing new VMs on a node when pool data **or** metadata use crosses **85 %**; an alert fires at **80 %**.
+   - Metadata LV ≥ 1 % of pool size, with `pool_metadata_spare` on.
+4. **QoS is per disk and identical in both classes**: `DiskQos` → libvirt `<iotune>` (QEMU throttling) on the disk. Every disk also gets an iothread (see [Compute](#compute)).
+5. **HA (`replicated` only).** When a node stops heartbeating, control fences it through its BMC (Redfish/IPMI power-off, confirmed) **before** restarting its VMs elsewhere; RBD `exclusive-lock` guards against double writers. No fencing, no restart.
+6. **Backups are class-independent** (same dirty-bitmap pipeline). For `local` they are the only protection against host loss, and the portal says so.
+
+Suggested pairing (CPU classes are separate plan fields):
+
+| Plan type | Storage | CPU / memory |
+|---|---|---|
+| Game | `local`, no thin overcommit | Dedicated CPU (1:1 pinning) + 1 GiB hugepages, single NUMA node |
+| Standard VPS | `local` | Shared CPU + THP |
+| Enterprise / HA | `replicated` | Shared or dedicated |
+
 ## Bare metal
 
 Native Rust `karen-metal`; no Ironic, no Tinkerbell (Scaleway dropped Ironic and built its own; Tinkerbell's sponsor Equinix Metal shut down 2026-06-30).
@@ -267,6 +321,7 @@ flowchart LR
 | Kernel tuning | `fq` + BBR v1, multiqueue vhost-net, MTU 9216, NUMA IRQs, hugepages/THP | [networking](./research/networking.md) |
 | Storage P0 | Local NVMe, `raw` on LVM-thin, io_uring `cache=none` | [storage](./research/storage-metal-web.md) |
 | Storage P1 | Ceph Tentacle 20.2.x RBD, many medium clusters | [storage](./research/storage-metal-web.md) |
+| Storage classes | `local` (LVM-thin on NVMe RAID) and `replicated` (Ceph RBD), one per plan; volumes always `replicated`; HA only with BMC fencing | [storage](./research/storage-metal-web.md) |
 | Backups | Own dirty-bitmap chunked dedup on S3; PBS protocol target only | [storage](./research/storage-metal-web.md) |
 | Metal | Native `karen-metal`: Redfish/IPMI, HTTPS Boot, Rust ramdisk, crypto-erase | [storage](./research/storage-metal-web.md), [providers](./research/providers.md) |
 | Web hosting | Container per account, cgroup v2 + userns, PHP-FPM per account | [storage](./research/storage-metal-web.md), [providers](./research/providers.md) |
