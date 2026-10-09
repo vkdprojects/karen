@@ -20,7 +20,7 @@ Each milestone ends with something runnable. Order can change; scope only grows 
 ## v0.2 — Usable for one admin
 - [ ] Cloud-init templates (Debian, Ubuntu, Rocky, Alma)
 - [ ] IPAM: IPv4/IPv6 pools, auto-assign, static via cloud-init
-- [ ] nftables anti-spoofing per VM (MAC/IP)
+- [ ] nftables anti-spoofing per VM (MAC/IP) in every network mode
 - [ ] Web console (noVNC proxy through control plane)
 - [ ] Web UI v1: nodes, VMs, IP pools
 - [ ] PostgreSQL support
@@ -36,24 +36,26 @@ Each milestone ends with something runnable. Order can change; scope only grows 
 
 ## v0.4 — Production networking & storage
 - [ ] Multi-node scheduler (placement by capacity, groups, tags)
-- [ ] VLAN and routed modes
+- [ ] VLAN, routed, NAT (v4/v6) and Open vSwitch modes; OVH/Hetzner routed guides
 - [ ] rDNS (PowerDNS API plugin)
 - [ ] Storage plugins: LVM-thin, ZFS, Ceph RBD
 - [ ] Disk IOPS/throughput and network rate limits
-- [ ] Scheduled backups to S3 and Proxmox Backup Server
+- [ ] Backups: S3 and Proxmox Backup Server, incremental, encrypted, GFS retention
 - [ ] WHMCS module
 
 ## v0.5 — Business features
 - [ ] Reseller role with quotas
 - [ ] Live migration (shared and local storage)
 - [ ] Blesta and Paymenter modules
-- [ ] Webhooks, scoped API tokens, OpenAPI published
-- [ ] 2FA (TOTP, WebAuthn)
+- [ ] Webhooks + event hooks, scoped API tokens (rate limit, expiry), OpenAPI published
+- [ ] 2FA (TOTP, WebAuthn) + step-up auth for destructive actions
+- [ ] Self-service: hourly billing, credit balance, auto-suspend on negative balance
 - [ ] i18n (en, pt-BR)
 
 ## v0.6 — Adoption
 - [ ] Importers: VirtFusion, Virtualizor, Proxmox
-- [ ] LXC / Incus containers
+- [ ] LXC / Incus containers, ARM64 hypervisors
+- [ ] Disaster recovery (cross-node restore), `karen-agent uninstall`
 - [ ] Install script + packaged releases (deb, rpm, static musl)
 - [ ] Documentation site
 
