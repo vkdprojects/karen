@@ -64,7 +64,7 @@ pub trait Vmm: Send + Sync {
 
 | Role | VMM | Interface | Why | Limits |
 |---|---|---|---|---|
-| VPS (primary, v0.1) | QEMU 11.x / KVM via libvirt 12.x | Agent emits domain XML; QMP for gaps | Only VMM with Windows, ISO, VNC, OVMF Secure Boot NVRAM, vTPM, VFIO, local-disk live migration (NBD mirror) | Larger attack surface → hardening below |
+| VPS (primary, v0.1) | QEMU / KVM via libvirt, Ubuntu virtualization HWE stack (see [Host platform](#host-platform)) | Agent emits domain XML; QMP for gaps | Only VMM with Windows, ISO, VNC, OVMF Secure Boot NVRAM, vTPM, VFIO, local-disk live migration (NBD mirror) | Larger attack surface → hardening below |
 | VPS Linux tier (v0.7) | Cloud Hypervisor v53+ | Its REST API (not the libvirt `ch` driver) | Rust, smaller surface | No ISO or graphical console; Windows install needs QEMU; migration doesn't move disks |
 | `web` app tier (v0.7) | Firecracker 1.17+ | MMIO transport, jailer | ≤5 MiB overhead, ≤125 ms boot | No Windows, ISO or live migration → never for VPS |
 
@@ -83,7 +83,7 @@ Exactly two modes. VLAN is OVN `localnet`, NAT is OVN NAT; there is no third cod
 | Mode | When | Dataplane | Anti-spoof |
 |---|---|---|---|
 | `routed` | P0, single node, behind Hetzner/OVH-style upstreams | Per-VM tap, static `/32` + routed `/64`, proxy ARP/NDP, `tc` police. No Linux bridge, no MacVTap | nftables `netdev` ingress on each tap |
-| `ovn` | P1+, multi-node | OVS 3.7 LTS kernel datapath + OVN 26.09 + FRR 10.7; Geneve VPC; `qos_max_rate` + pps meters | OVN `port_security` |
+| `ovn` | P1+, multi-node | OVS 3.7 LTS kernel datapath + OVN 26.03 + FRR (Ubuntu archive); Geneve VPC; `qos_max_rate` + pps meters | OVN `port_security` |
 
 ```mermaid
 flowchart LR
@@ -235,7 +235,7 @@ A **class** is what the customer buys (latency, durability). A **backend** is ho
 | For | Game servers, latency-sensitive apps, cheap VPS | Enterprise, HA plans, detachable volumes |
 | Backend | `raw` LV on LVM-thin, local NVMe | Ceph RBD (`size=3`, `min_size=2`, failure domain `host`). LINSTOR/DRBD may back it later |
 | QD1 4k latency | ~50 µs | ~0.5 ms read / ~1 ms write |
-| Disk failure | Survived: pool sits on md RAID1/RAID10 | Survived: Ceph re-replicates |
+| Disk failure | Depends on the node's `local_layout` (below): `jbod` loses the VMs on that disk, `raid0` loses every `local` VM on the node, `raid1`/`raid10`/`raid5` survive | Survived: Ceph re-replicates |
 | Host failure | VM is down until the host returns, or is restored from its last backup (RPO = backup interval) | VM restarts on another node (HA, after fencing) |
 | Live migration | NBD mirror copies disk + RAM; planned maintenance only | Instant: RAM only, disk is shared |
 | Snapshots | LVM-thin snapshots | RBD snapshots |
@@ -263,7 +263,7 @@ pub struct PlanStorage {
 
 Rules:
 1. **Class is fixed by the plan.** A VM's root disk inherits it. Changing class means changing plan; the conversion is a live copy (QEMU `blockdev-mirror` between LVM-thin and RBD), run as a normal idempotent task (v0.7).
-2. **Nodes advertise classes.** The agent reports `local` only if the thin pool sits on md RAID1/RAID10 (or a hardware RAID volume) built from NVMe; a single-disk pool is refused unless the node has `allow_unprotected_local = true` (dev only). `replicated` is reported when the node can open the configured Ceph pool.
+2. **Nodes advertise classes and their disk layout.** The agent reports `local` for every LVM-thin pool it manages, with the node's `local_layout`, and `replicated` when the node can open the configured Ceph pool. No layout is refused: redundancy is the operator's choice (see [Local disk layout](#local-disk-layout)).
 3. **Thin-pool safety (`local`).** A full thin pool freezes or errors every VM on the node, so:
    - Per-node `max_thin_overcommit` (default `1.0`, i.e. no overcommit; game nodes must keep `1.0`).
    - The scheduler stops placing new VMs on a node when pool data **or** metadata use crosses **85 %**; an alert fires at **80 %**.
@@ -272,6 +272,37 @@ Rules:
 5. **HA (`replicated` only).** When a node stops heartbeating, control fences it through its BMC (Redfish/IPMI power-off, confirmed) **before** restarting its VMs elsewhere; RBD `exclusive-lock` guards against double writers. No fencing, no restart.
 6. **Backups are class-independent** (same dirty-bitmap pipeline). For `local` they are the only protection against host loss, and the portal says so.
 
+#### Local disk layout
+
+Per-node setting, detected and reported by the agent, never refused:
+
+```rust
+pub enum LocalLayout {
+    Jbod,    // default: one LVM-thin pool per NVMe
+    Raid0,   // mdadm stripe, one pool
+    Raid1,   // mdadm mirror
+    Raid10,
+    Raid5,
+}
+```
+
+| Layout | Usable space (2 × 2 TB) | One disk dies | Notes |
+|---|---|---|---|
+| `jbod` (**default**) | 4 TB (2 pools × 2 TB) | Loses only the VMs on that disk | Same latency as RAID 0. A VM disk can't exceed one NVMe. The scheduler balances VMs across pools |
+| `raid0` | 4 TB (1 pool) | Loses every `local` VM on the node | Doubles sequential throughput only; QD1 latency unchanged. A single PCIe 3.0 NVMe (~3.5 GB/s) already exceeds what one VM uses |
+| `raid1` / `raid10` | 2 TB / half of raw | Survived | Use when budget allows |
+| `raid5` | (n−1) × disk | Survived | Write penalty; avoid for write-heavy plans |
+
+- RAID is software (mdadm): NVMe on HPE Gen9/Gen10 is not behind the Smart Array controller.
+- Layouts without redundancy (`jbod`, `raid0`) are flagged "no disk redundancy" in the admin UI. A plan may set `require_disk_redundancy = true`; the scheduler then only uses `raid1`/`raid10`/`raid5` nodes. Default `false`.
+- The scheduler treats each `jbod` pool as its own capacity bucket, with the thin-pool limits above applied per pool.
+
+#### Disk format
+
+- **VM disks: `raw` on LVM-thin.** Fastest path (no filesystem or qcow2 metadata layer). Snapshots come from LVM-thin, not from the format.
+- **Templates: `qcow2` files** in the image store, written into a new LV with `qemu-img convert` on create/reinstall.
+- **To test (v0.3, before choosing the backup design): `qcow2` with an external raw data file** (`data-file=<LV>`, `data-file-raw=on`). Data stays on the raw LV at raw speed, and a small qcow2 beside it holds **persistent dirty bitmaps**, so incremental backups survive VM shutdown/resize instead of falling back to a full chunk-hash read. Adopt only if the benchmark shows no measurable latency cost against plain `raw`.
+
 Suggested pairing (CPU classes are separate plan fields):
 
 | Plan type | Storage | CPU / memory |
@@ -279,6 +310,41 @@ Suggested pairing (CPU classes are separate plan fields):
 | Game | `local`, no thin overcommit | Dedicated CPU (1:1 pinning) + 1 GiB hugepages, single NUMA node |
 | Standard VPS | `local` | Shared CPU + THP |
 | Enterprise / HA | `replicated` | Shared or dedicated |
+
+## Host platform
+
+**Hypervisor and control-plane OS: Ubuntu 26.04 LTS** (x86_64). Chosen over Debian for newer kernel, NVMe and NIC drivers, and because Ubuntu now ships an HWE stack for virtualization.
+
+**HWE (Hardware Enablement):** Canonical's supported channel that brings newer versions from interim releases into the LTS. Two stacks are used:
+
+| Stack | Packages | Cadence |
+|---|---|---|
+| Kernel HWE | `linux-generic-hwe-26.04` | New kernel from each interim release, starting with 26.04.2 (early 2027, 26.10's kernel) |
+| Virtualization HWE | `qemu-hwe`, `libvirt-hwe`, `edk2-hwe` (OVMF), `seabios-hwe`; switched as one unit with `ubuntu-helper-virt-hwe` | Every 6 months for the first 2 years of the LTS (from 26.04.1), then frozen until the move to 28.04 LTS |
+
+OVS, OVN and FRR come from the Ubuntu 26.04 archive (OVS 3.7 is the upstream LTS line). No KAREN-built packages.
+
+### Versions (checked 2026-10-09)
+
+| Component | Ubuntu 26.04 base | Via HWE | Latest upstream |
+|---|---|---|---|
+| Kernel | 7.0 | 26.04.2: 26.10's kernel (expected 7.2) | 7.2.x stable; 7.3 due late Oct 2026 |
+| QEMU | 10.2.1 | Next virt-HWE refresh (expected 11.x) | 11.1.x |
+| libvirt | 12.0 | Next virt-HWE refresh | 12.6+ |
+| Open vSwitch | 3.7.1 (LTS line) | — | 4.0.0 |
+| OVN | 26.03 | — | 26.09 |
+| FRR | Ubuntu archive | — | 10.7.x |
+
+"Expected" values are inferences from the HWE cadence, not published versions. Re-check this table at every HWE refresh.
+
+### Update policy
+
+1. **Security updates and point releases** (e.g. 3.7.1 → 3.7.2, kernel SRUs): applied automatically after CI passes; kernel fixes through livepatch, then the rolling-reboot pipeline.
+2. **New minor/major versions** (each HWE refresh, a new OVN/OVS line, a 28.04 move): run 2–4 weeks on a staging node with real workloads, then roll out node by node.
+3. Every node runs the **same** pinned set of versions for QEMU, libvirt, OVMF, kernel, OVS/OVN/FRR. `karen-agent` reports them on enrollment and on every heartbeat; the admin UI flags nodes that drift from the fleet target.
+4. Live migration only between nodes on the same QEMU major/minor, or from older to newer.
+
+Hardware note: HPE Gen9 and Gen10 (Intel) are PCIe 3.0 and not HPE-certified for Ubuntu 26.04; Gen4 NVMe runs at PCIe 3.0 speed there. Install the OS on SATA/M.2; NVMe is for VM pools. Validate each server generation on a test node before production.
 
 ## Bare metal
 
@@ -309,19 +375,23 @@ flowchart LR
 | Area | Decision | Source |
 |---|---|---|
 | Product lines | 3 SKUs: `vps`, `metal`, `web` | — |
-| VPS VMM primary | QEMU 11.x / KVM via libvirt 12.x, domain XML + QMP, behind `Vmm` | [vmm](./research/vmm.md) |
+| VPS VMM primary | QEMU / KVM via libvirt (Ubuntu virt HWE), domain XML + QMP, behind `Vmm` | [vmm](./research/vmm.md) |
 | VPS VMM secondary | Cloud Hypervisor v53+ via REST API, Linux tier, v0.7 | [vmm](./research/vmm.md) |
 | App microVMs | Firecracker 1.17+ for the `web` app tier only | [vmm](./research/vmm.md) |
 | Host hardening | Nested off, `/dev/kvm` 0660, livepatch, q35 virtio-only, no `scsi=on` | [vmm](./research/vmm.md) |
 | Network P0 | Routed tap, `/32` + `/64`, proxy ARP/NDP, nftables anti-spoof, `tc` | [networking](./research/networking.md) |
-| Network P1+ | OVS 3.7 LTS + OVN 26.09 + FRR 10.7, BGP unnumbered to host | [networking](./research/networking.md) |
+| Network P1+ | OVS 3.7 LTS + OVN 26.03 + FRR from the Ubuntu archive, BGP unnumbered to host | [networking](./research/networking.md) |
 | Network modes | Exactly two: `routed`, `ovn` | [networking](./research/networking.md) |
 | Network avoid | OVS-DPDK default, AF_XDP, SR-IOV for VPS, SRv6, stretched L2, BBRv3 | [networking](./research/networking.md) |
 | Edge | ≥2 transits, 2× IX.br SP, Routinator, FastNetMon → RTBH/Flowspec, XDP | [networking](./research/networking.md) |
 | Kernel tuning | `fq` + BBR v1, multiqueue vhost-net, MTU 9216, NUMA IRQs, hugepages/THP | [networking](./research/networking.md) |
 | Storage P0 | Local NVMe, `raw` on LVM-thin, io_uring `cache=none` | [storage](./research/storage-metal-web.md) |
 | Storage P1 | Ceph Tentacle 20.2.x RBD, many medium clusters | [storage](./research/storage-metal-web.md) |
-| Storage classes | `local` (LVM-thin on NVMe RAID) and `replicated` (Ceph RBD), one per plan; volumes always `replicated`; HA only with BMC fencing | [storage](./research/storage-metal-web.md) |
+| Storage classes | `local` (LVM-thin on NVMe) and `replicated` (Ceph RBD), one per plan; volumes always `replicated`; HA only with BMC fencing | [storage](./research/storage-metal-web.md) |
+| Local disk layout | Per-node `local_layout` (`jbod` default, `raid0`, `raid1`, `raid10`, `raid5`), never refused; plans may require redundancy | — |
+| Disk format | `raw` on LVM-thin; `qcow2` for templates; qcow2 external data file to be benchmarked for persistent bitmaps | [storage](./research/storage-metal-web.md) |
+| Host OS | Ubuntu 26.04 LTS + kernel HWE + virtualization HWE; OVS/OVN/FRR from the Ubuntu archive | [Ubuntu virt HWE](https://ubuntu.com/server/docs/how-to/virtualisation/virt-hwe/) |
+| Update policy | Point releases auto after CI; new versions after 2–4 weeks on staging; one pinned version set per fleet | — |
 | Backups | Own dirty-bitmap chunked dedup on S3; PBS protocol target only | [storage](./research/storage-metal-web.md) |
 | Metal | Native `karen-metal`: Redfish/IPMI, HTTPS Boot, Rust ramdisk, crypto-erase | [storage](./research/storage-metal-web.md), [providers](./research/providers.md) |
 | Web hosting | Container per account, cgroup v2 + userns, PHP-FPM per account | [storage](./research/storage-metal-web.md), [providers](./research/providers.md) |

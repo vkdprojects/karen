@@ -13,7 +13,8 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 ## v0.1 — First VM
 - [ ] Agent ↔ control gRPC over mTLS, one-time enrollment token
 - [ ] QEMU via libvirt: create, start, stop, destroy
-- [ ] `local` storage class: raw LVs on LVM-thin; agent refuses pools not on NVMe RAID1/10
+- [ ] `local` storage class: raw LVs on LVM-thin; `local_layout` detection (`jbod` default, `raid0/1/10/5`), one pool per NVMe in `jbod`
+- [ ] Host baseline: Ubuntu 26.04 LTS; agent reports kernel/QEMU/libvirt/OVMF/OVS/OVN/FRR versions
 - [ ] **Routed tap** networking with nftables `netdev` ingress anti-spoof (always on)
 - [ ] SQLite, admin API token
 - [ ] CLI: `karen vm create|list|start|stop|delete`
@@ -39,7 +40,9 @@ Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - [ ] **Network graphs**: tap `IFLA_STATS64` every 10 s → VictoriaMetrics → tenant-scoped proxy; 1h/24h/7d/30d. Plus CPU/disk graphs
 - [ ] **Traffic accounting**: 5-min deltas, monthly totals, 95th percentile
 - [ ] Prometheus endpoint, audit log
+- [ ] Benchmark qcow2 external data file (`data-file-raw=on`) vs plain raw; adopt if no latency cost (persistent bitmaps)
 - [ ] Incremental backups to S3 (dirty bitmaps, chunked dedup)
+- [ ] Admin UI: version drift per node; "no disk redundancy" flag; plan option `require_disk_redundancy`
 
 ## v0.4 — Multi-node + OVN
 - [ ] Scheduler (capacity, groups, tags, storage class; stops placing at 85 % thin-pool data/metadata)
