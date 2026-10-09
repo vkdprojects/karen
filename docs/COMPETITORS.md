@@ -59,6 +59,10 @@ Sources: [docs](https://docs.virtfusion.com/), [v7 release notes](https://docs.v
 | **Virtuozzo / VMware** | Enterprise features | Enterprise pricing, not hosting-panel focused | — |
 | **Tenantos / SynergyCP** | Bare-metal: IPMI, PXE, OS install | Not VPS | — |
 | **Vormox** | Proxmox + built-in billing, markets itself as a "VirtFusion alternative" | Proxmox-dependent, commercial | [vormox.com](https://vormox.com/virtfusion-alternative) |
+| **cPanel/WHM** (WebPros) | Industry default for shared hosting; Apache/LiteSpeed; CloudLinux LVE + CageFS add-on | Solo $29.99 → Premier $69.99/mo + **$0.49/account over 100**; up to ~20% more in 2027. Exploited bug in Apr 2026. WHMCS lock-in (same owner) | [pricing](https://support.cpanel.net/hc/en-us/articles/30117774089879-2026-cPanel-Store-License-Pricing), [research](./research/providers.md) |
+| **Plesk** (WebPros) | Apache + nginx, per-subscription users | $18–$50/mo; same owner as cPanel | [CostBench](https://costbench.com/software/cloud-infrastructure/plesk) |
+| **Enhance** | Each site in its own container; cluster of 1–10,000 servers; zero-downtime site moves | Per-site billing; complaints about container RAM use | [features](https://enhance.com/product/features) |
+| **DirectAdmin** | Flat tiers, unlimited accounts on top tier; cheapest credible cPanel replacement | Unix user + CloudLinux isolation | [pricing](https://www.directadmin.com/pricing.php) |
 
 ## Open-source / source-available
 
@@ -70,9 +74,26 @@ Sources: [docs](https://docs.virtfusion.com/), [v7 release notes](https://docs.v
 | **ProxPanel** | Go | Proxmox + libvirt backends | Early-stage | [GitHub](https://github.com/proxpanel/proxpanel) |
 | **Incus / LXD** | Go | Solid container + VM engine, clustering | Infrastructure tool, not a hosting panel. Possible future backend for KAREN | — |
 | **OpenStack / CloudStack / OpenNebula** | Python / Java / C++ | Complete IaaS | Heavy, needs a team; overkill for 1–50 nodes | — |
+| **OpenPanel** | — | Each user in their own container (web server, DB, network) | Web hosting only | [GitHub](https://github.com/stefanpejcic/openpanel) |
+| **CloudPanel** | — | Free, nginx + PHP-FPM | Single admin, not built for multi-tenant resale | — |
+| **CyberPanel** | — | Free, OpenLiteSpeed | **PSAUX ransomware hit ~22k instances** via CVE-2024-51567; more auth-bypass CVEs in 2026 | [SOCRadar](https://socradar.io/blog/over-22000-cyberpanel-servers-at-risk-from-critical-vulnerabilities-exploitation-by-psaux-ransomware) |
 | **oVirt / Harvester** | Java / Go+K8s | Datacenter virt / HCI | Maintenance mode / requires Kubernetes | — |
 
 ---
+
+## Hosting providers (who sells on these stacks)
+
+Details and sources: [research/providers.md](./research/providers.md).
+
+| Provider | Stack highlights |
+|---|---|
+| DigitalOcean | KVM, L3 Clos with GoBGP on each hypervisor, OVS, Ceph (250+ PB) |
+| Hetzner | KVM, local NVMe live migration (<1 s blackout), triple-replicated volumes, Arbor DDoS |
+| OVHcloud | OpenStack KVM, vRack L2, in-house VAC DDoS (FPGA + x86) |
+| Vultr | KVM, own attack mitigation farm |
+| Fly.io | Firecracker, Rust proxy + gossip state, Anycast |
+| Hostinger | KVM VPS, in-house hPanel, CephFS, LiteSpeed + CloudLinux |
+| StayCloud | cPanel + LiteSpeed + WHMCS + Cloudflare; hypervisor not disclosed |
 
 ## Feature matrix
 
@@ -83,26 +104,28 @@ Sources: [docs](https://docs.virtfusion.com/), [v7 release notes](https://docs.v
 | Free for commercial use | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ |
 | Source available | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 | KVM | ✅ | ✅ | ✅ | ✅ | ✅ | v0.1 |
-| LXC / containers | ❌ | ✅ | 🟡 | ✅ | ❌ | v0.6 |
-| ARM64 hypervisors | ✅ | ? | ? | 🟡 | via PVE | v0.6 |
+| LXC / containers | ❌ | ✅ | 🟡 | ✅ | ❌ | web containers v0.5 |
+| ARM64 hypervisors | ✅ | ? | ? | 🟡 | via PVE | v0.8 |
 | End-user portal | ✅ | ✅ | ✅ | ❌ | ✅ | v0.3 |
-| Resellers | ? | ✅ | ❌ | ❌ | ❌ | v0.5 |
+| Resellers | ? | ✅ | ❌ | ❌ | ❌ | v0.7 |
 | Cloud-init | ✅ | ? | ✅ | ✅ | ✅ | v0.2 |
 | Custom ISO / Windows | ✅ | ✅ | 🟡 | ✅ | 🟡 | v0.3 |
-| Anti-spoof (MAC/IP) | 🟡 bridged/routed only | ✅ | ✅ OVS | 🟡 | ? | v0.2, **every mode** |
+| Anti-spoof (MAC/IP) | 🟡 bridged/routed only | ✅ | ✅ OVS | 🟡 | ? | v0.1, **every mode** |
+| VM firewall (per-VM rules) | 🟡 bridged/routed only | ✅ | ✅ | ✅ | ? | v0.2 routed / v0.4 OVN |
+| Per-VM network graphs + 95th billing | ✅ | ✅ | ✅ | 🟡 | 🟡 | v0.3 |
 | NAT VPS (v4/v6) | ✅ | ✅ | ? | 🟡 manual | ❌ | v0.4 |
 | VLAN / OVS | ✅ | ✅ | ✅ | ✅ | via PVE | v0.4 |
-| rDNS | ✅ | ✅ | ✅ | ❌ | ❌ | v0.4 |
-| Ceph RBD | ✅ | ✅ | ? | ✅ | via PVE | v0.4 |
-| PBS / S3 incremental backups | ✅ | 🟡 | 🟡 | ✅ | via PVE | v0.4 |
-| Live migration | ✅ | ✅ | ✅ | ✅ | ❌ | v0.5 |
-| Disaster recovery | ✅ | ? | ? | ✅ | ❌ | v0.6 |
-| Hourly billing / credits | 🟡 manual credits | ✅ | ✅ WHMCS | ❌ | ❌ | v0.5 |
-| WHMCS / Blesta / Paymenter | ✅ | ✅ | ✅ | ❌ | ✅ | v0.4–0.5 |
-| Webhooks / event hooks | ✅ | ? | ? | 🟡 | ? | v0.5 |
-| Importer from competitors | ✅ | ✅ | ✅ | — | ❌ | v0.6 |
+| rDNS | ✅ | ✅ | ✅ | ❌ | ❌ | v0.2 |
+| Ceph RBD | ✅ | ✅ | ? | ✅ | via PVE | v0.7 |
+| PBS / S3 incremental backups | ✅ | 🟡 | 🟡 | ✅ | via PVE | v0.3 |
+| Live migration | ✅ | ✅ | ✅ | ✅ | ❌ | v0.4 |
+| Disaster recovery | ✅ | ? | ? | ✅ | ❌ | v0.8 |
+| Hourly billing / credits | 🟡 manual credits | ✅ | ✅ WHMCS | ❌ | ❌ | v0.7 |
+| WHMCS / Blesta / Paymenter | ✅ | ✅ | ✅ | ❌ | ✅ | v0.4 / v0.7 |
+| Webhooks / event hooks | ✅ | ? | ? | 🟡 | ? | v0.7 |
+| Importer from competitors | ✅ | ✅ | ✅ | — | ❌ | v0.8 |
 | HA control plane | ❌ documented | ❌ | ? | ✅ | ❌ | later |
-| Uninstaller / clean removal | ❌ | ? | ? | — | ? | v0.6 |
+| Uninstaller / clean removal | ❌ | ? | ? | — | ? | v0.8 |
 | Prometheus metrics | ❌ | ❌ | ? | 🟡 | ❌ | v0.3 |
 
 ## What KAREN must copy from VirtFusion (table stakes)
@@ -115,7 +138,7 @@ Sources: [docs](https://docs.virtfusion.com/), [v7 release notes](https://docs.v
 
 ## Where KAREN beats it
 1. **MIT, no license server, no phone-home.** Runs air-gapped; no reissue limits.
-2. **Anti-spoofing in every network mode** (nftables on the bridge/tap), not just bridged/routed.
+2. **Anti-spoofing in every network mode** (nftables on the tap in routed mode, OVN `port_security` in OVN mode).
 3. **Clean install/uninstall.** Two binaries + systemd units; `karen-agent uninstall`.
 4. **HA control plane** on the roadmap; Postgres-backed.
 5. **Finished self-service:** hourly billing with automatic suspend on negative balance and a billing API.

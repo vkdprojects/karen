@@ -2,70 +2,95 @@
 
 Each milestone ends with something runnable. Order can change; scope only grows after the previous milestone ships.
 
+Design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+
 ## v0.0 — Foundation
-- [ ] Cargo workspace: `karen-core`, `karen-proto`, `karen-control`, `karen-agent`, `karen-cli`
+- [ ] Cargo workspace: `karen-core`, `karen-proto`, `karen-control`, `karen-agent`, `karen-metal`, `karen-edge`, `karen-cli`
 - [ ] CI: fmt, clippy, test, `cargo-deny`, typos
-- [ ] License, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, issue/PR templates
-- [ ] Architecture doc (`docs/ARCHITECTURE.md`) and data model draft
-- [ ] Dev environment: nested-KVM test VM (Vagrant / cloud image + script)
+- [ ] CODE_OF_CONDUCT, issue/PR templates
+- [ ] Nested-KVM dev VM script
 
-## v0.1 — First VM (single node)
-- [ ] Agent: libvirt connection, define/start/stop/destroy KVM domain
-- [ ] Agent ↔ control: gRPC over mTLS, node enrollment with one-time token
-- [ ] Control: REST API, SQLite, admin auth (API token)
-- [ ] Local qcow2 storage, Linux bridge networking
+## v0.1 — First VM
+- [ ] Agent ↔ control gRPC over mTLS, one-time enrollment token
+- [ ] QEMU via libvirt: create, start, stop, destroy
+- [ ] LVM-thin raw disks
+- [ ] **Routed tap** networking with nftables `netdev` ingress anti-spoof (always on)
+- [ ] SQLite, admin API token
 - [ ] CLI: `karen vm create|list|start|stop|delete`
-- [ ] Task queue with idempotent, retryable jobs
+- [ ] Idempotent task queue
+- [ ] Host hardening baseline applied by the agent (nested virt off, `/dev/kvm` 0660 check)
 
-## v0.2 — Usable for one admin
-- [ ] Cloud-init templates (Debian, Ubuntu, Rocky, Alma)
-- [ ] IPAM: IPv4/IPv6 pools, auto-assign, static via cloud-init
-- [ ] nftables anti-spoofing per VM (MAC/IP) in every network mode
-- [ ] Web console (noVNC proxy through control plane)
-- [ ] Web UI v1: nodes, VMs, IP pools
-- [ ] PostgreSQL support
+## v0.2 — Usable by one admin
+- [ ] cloud-init templates: Debian, Ubuntu, Rocky, Alma
+- [ ] IPAM: IPv4 `/32` + IPv6 `/64` per VM
+- [ ] VNC console proxy
+- [ ] Web UI v1
+- [ ] PostgreSQL
+- [ ] rDNS (PowerDNS)
+- [ ] **VM firewall in routed mode**: `FirewallPolicy` API → nftables `inet karen` per-VM chains, stateless default, opt-in stateful, deny logging via nflog
+- [ ] Per-VM `tc` rate limits
 
-## v0.3 — Hosting panel
-- [ ] Users, roles (admin / customer), RBAC
-- [ ] Plans/packages (CPU, RAM, disk, bandwidth, IPs)
-- [ ] Customer portal: power, reinstall, console, password reset, SSH keys
-- [ ] ISO boot + Windows templates (virtio drivers)
+## v0.3 — Hosting panel (VPS)
+- [ ] Users/RBAC (admin, customer)
+- [ ] Plans, incl. monthly traffic quota and `overage_action: Throttle|Suspend` (default `Throttle` to 10 Mbit/s via `tc` / OVN qos until month rollover)
+- [ ] Customer portal: power, reinstall, console, password reset, SSH keys, firewall editor
+- [ ] ISO + Windows (virtio, OVMF, swtpm)
 - [ ] Snapshots
-- [ ] Metrics: per-VM CPU/RAM/disk/net, bandwidth accounting, Prometheus endpoint
-- [ ] Audit log
+- [ ] **Network graphs**: tap `IFLA_STATS64` every 10 s → VictoriaMetrics → tenant-scoped proxy; 1h/24h/7d/30d. Plus CPU/disk graphs
+- [ ] **Traffic accounting**: 5-min deltas, monthly totals, 95th percentile
+- [ ] Prometheus endpoint, audit log
+- [ ] Incremental backups to S3 (dirty bitmaps, chunked dedup)
 
-## v0.4 — Production networking & storage
-- [ ] Multi-node scheduler (placement by capacity, groups, tags)
-- [ ] VLAN, routed, NAT (v4/v6) and Open vSwitch modes; OVH/Hetzner routed guides
-- [ ] rDNS (PowerDNS API plugin)
-- [ ] Storage plugins: LVM-thin, ZFS, Ceph RBD
-- [ ] Disk IOPS/throughput and network rate limits
-- [ ] Backups: S3 and Proxmox Backup Server, incremental, encrypted, GFS retention
+## v0.4 — Multi-node + OVN
+- [ ] Scheduler (capacity, groups, tags)
+- [ ] OVN mode: `port_security`, **same `FirewallPolicy` compiled to OVN ACLs / Port_Groups / Address_Sets**, ACL logging with meter, VPC over Geneve, NAT, VLAN localnet, qos + pps meters
+- [ ] Firewall and graph parity tests between `routed` and `ovn`
+- [ ] FRR BGP unnumbered host ↔ leaf
+- [ ] Live migration with local disks (NBD mirror) + `/32` move; firewall policy re-applied on the destination before cut-over
+- [ ] Switch sFlow → FastNetMon
 - [ ] WHMCS module
 
-## v0.5 — Business features
-- [ ] Reseller role with quotas
-- [ ] Live migration (shared and local storage)
-- [ ] Blesta and Paymenter modules
-- [ ] Webhooks + event hooks, scoped API tokens (rate limit, expiry), OpenAPI published
-- [ ] 2FA (TOTP, WebAuthn) + step-up auth for destructive actions
-- [ ] Self-service: hourly billing, credit balance, auto-suspend on negative balance
-- [ ] i18n (en, pt-BR)
+## v0.5 — Web hosting
+- [ ] Account containers (cgroup v2 + userns + overlay + PHP-FPM)
+- [ ] `karen-edge` (Pingora, on-demand ACME with ownership check)
+- [ ] Domains / DNS / mail-relay integration
+- [ ] One-click apps catalog (n8n, etc.) on VPS via cloud-init
 
-## v0.6 — Adoption
+## v0.6 — Dedicated (metal)
+- [ ] `karen-metal` power, console (SOL) and inventory via Redfish + IPMI
+- [ ] HTTPS Boot → iPXE → ramdisk agent; reinstall
+- [ ] NVMe crypto-erase, fail closed
+- [ ] Switch-port VLAN automation
+
+## v0.7 — Business + scale
+- [ ] Resellers with quotas
+- [ ] Hourly billing + credit balance + auto-suspend
+- [ ] Blesta / Paymenter modules, webhooks
+- [ ] Scoped API tokens (rate limit, expiry); 2FA + step-up auth
+- [ ] Ceph RBD volumes
+- [ ] Cloud Hypervisor Linux tier
+- [ ] Firecracker app tier (scale-to-zero)
+- [ ] i18n: en, pt-BR
+
+## v0.8 — Adoption
 - [ ] Importers: VirtFusion, Virtualizor, Proxmox
-- [ ] LXC / Incus containers, ARM64 hypervisors
-- [ ] Disaster recovery (cross-node restore), `karen-agent uninstall`
-- [ ] Install script + packaged releases (deb, rpm, static musl)
-- [ ] Documentation site
+- [ ] ARM64 hypervisors
+- [ ] Disaster recovery
+- [ ] `karen-agent uninstall`
+- [ ] Packages: deb, rpm, static musl
+- [ ] Docs site
+- [ ] Edge kit docs (IX.br, RPKI Routinator, FastNetMon → RTBH/Flowspec)
 
 ## v1.0 — Stable
-- [ ] Stable API (semver), upgrade path guaranteed
+- [ ] Semver API
 - [ ] External security audit
-- [ ] Load test: 50 nodes / 5,000 VMs on one control plane
+- [ ] Load test: 50 nodes / 5,000 VMs
 
 ## Later
-- HA control plane (Postgres replication + leader election)
-- Bare-metal provisioning (IPMI / PXE)
-- Object storage / load balancer add-ons
-- WASM plugin interface for non-Rust plugins
+- HA control plane
+- OVS TC offload / BlueField DPU
+- Firmware automation
+- EVPN for metal L2
+- GPU (VFIO) SKUs
+- Confidential VMs (SEV-SNP / TDX via QEMU)
+- Anycast DNS

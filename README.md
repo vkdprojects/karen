@@ -4,7 +4,7 @@
 
 **Kernel Automation Resource Engine & Networking**
 
-Self-hosted VPS control panel in Rust. An open-source alternative to VirtFusion, Virtualizor and SolusVM.
+Open-source platform to run a hosting company: VPS, dedicated servers and website hosting. An MIT alternative to VirtFusion, Virtualizor, SolusVM — and to stacking cPanel + CloudLinux + LiteSpeed licenses.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.80+-orange)](https://rust-lang.org)
@@ -18,9 +18,9 @@ Self-hosted VPS control panel in Rust. An open-source alternative to VirtFusion,
 
 > **Status: pre-alpha.** Nothing here runs yet. This repo is the design and the plan. See [ROADMAP.md](./ROADMAP.md).
 
-KAREN turns a pile of Linux/KVM boxes into a VPS hosting platform: a control plane that schedules and provisions VMs, and a tiny agent on each hypervisor that talks to libvirt/QEMU, storage and the network.
+KAREN turns a pile of Linux/KVM boxes and bare-metal servers into a hosting company: VPS, dedicated servers and website hosting from one control plane, with small Rust agents on hypervisors, the bare-metal network and the web edge.
 
-Two static binaries. No PHP, no Node, no Docker required. Your hardware, your license, no per-node fees.
+Static Rust binaries. No PHP, no Node, no Docker required. Your hardware, your license, no per-node fees.
 
 ## Why
 
@@ -28,30 +28,22 @@ Two static binaries. No PHP, no Node, no Docker required. Your hardware, your li
 |---|---|
 | VirtFusion / Virtualizor / SolusVM are closed source with per-node licensing | MIT, free, auditable |
 | PHP monoliths, ionCube-encoded, hard to extend | Rust core, plugin crates, public API first |
-| Proxmox is great virtualization but not a hosting panel (no end-user portal, billing hooks, IP pools per customer) | Hosting-first: tenants, plans, IPAM, billing integrations |
+| Licensed web stack: cPanel charges $0.49/account over 100, with price increases in 2027; plus CloudLinux and LiteSpeed licenses | Container-per-account isolation + Pingora-based edge, no per-account fees |
+| Open-source panels are Proxmox wrappers (Convoy, Vormox, FeatherPanel) | Standalone: talks to KVM, storage, network and BMCs directly |
 | OpenStack / CloudStack are heavy for 1–50 node hosts | Single binary per role; runs on a $4 VPS for the control plane |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  U[Admin / Customer] --> W[Web UI]
-  B[WHMCS / Blesta / Paymenter] --> API
-  W --> API[karen-control<br/>REST + gRPC]
-  API --> DB[(PostgreSQL / SQLite)]
-  API -- mTLS gRPC --> A1[karen-agent<br/>node 1]
-  API -- mTLS gRPC --> A2[karen-agent<br/>node N]
-  A1 --> L1[libvirt / QEMU-KVM]
-  A1 --> S1[Storage: local, LVM, ZFS, Ceph]
-  A1 --> N1[Network: bridge, VLAN, nftables]
+  U[Admin / Customer / Billing] --> C[karen-control]
+  CLI[karen CLI] --> C
+  A[karen-agent<br/>hypervisors] -- mTLS gRPC --> C
+  M[karen-metal<br/>bare metal] -- mTLS gRPC --> C
+  E[karen-edge<br/>web L7] -- mTLS gRPC --> C
 ```
 
-| Component | Role |
-|---|---|
-| `karen-control` | API, scheduler, IPAM, users/RBAC, task queue, web UI (embedded) |
-| `karen-agent` | Runs on each hypervisor. VM lifecycle, storage, network, metrics, VNC proxy |
-| `karen` CLI | Admin ops, bootstrap, node enrollment |
-| `crates/` | Shared types, protocol, plugins (storage, network, billing) |
+Full design: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md). Research behind it: [docs/research/](./docs/research/).
 
 Design rules (same philosophy as [vkdg](https://github.com/vkdprojects/vkdg)):
 
@@ -59,40 +51,53 @@ Design rules (same philosophy as [vkdg](https://github.com/vkdprojects/vkdg)):
 - **API first.** The UI is just an API client. Everything the UI does, a script can do.
 - **Agent is dumb, control plane is the brain.** Agents execute idempotent tasks; state lives in one place.
 - **Plugins, not forks.** Storage backends, network modes, billing modules are crates behind traits.
-- **Boring tech.** libvirt, PostgreSQL, nftables, cloud-init. No custom hypervisor.
+- **Boring tech.** QEMU/libvirt, PostgreSQL, nftables, OVN, cloud-init. No custom hypervisor.
 
 ## Features
 
 Target scope for v1.0. Progress tracked in [ROADMAP.md](./ROADMAP.md).
 
-**Virtualization**
-- KVM/QEMU via libvirt; LXC/Incus containers later
-- Create, start, stop, reboot, reinstall, resize, rescue mode, destroy
-- Templates + cloud-init (Linux), ISO boot, Windows images
-- Snapshots and scheduled backups (local, S3, PBS)
-- Live migration between nodes
+**VPS**
+- QEMU/KVM via libvirt; Cloud Hypervisor tier for Linux cloud images later
+- Create, start, stop, reboot, reinstall, resize, rescue, destroy
+- cloud-init templates, ISO boot, Windows (OVMF, vTPM)
+- Snapshots, live migration with local disks
+- Host hardening: nested virt off by default
 
-**Networking**
-- IPv4/IPv6 pools, per-customer allocation, rDNS
-- Bridged, routed and VLAN modes
-- Anti-spoofing (MAC/IP filtering via nftables)
-- Bandwidth limits and traffic accounting
+**Dedicated (metal)**
+- `karen-metal`: power, serial console and inventory via Redfish + IPMI
+- UEFI HTTPS Boot → iPXE → Rust ramdisk agent for installs
+- NVMe crypto-erase on release, fail closed
+- Switch-port VLAN automation
+
+**Web hosting**
+- One container per account (cgroup v2, user namespaces, per-account PHP-FPM)
+- `karen-edge`: Pingora-based L7 proxy with on-demand ACME
+- Firecracker microVMs for apps, scale-to-zero
+- One-click apps (n8n, etc.) on VPS
+
+**Network**
+- Routed mode and OVN mode; anti-spoof in both
+- IPv4 `/32` + IPv6 `/64` per VM, rDNS via PowerDNS
+- BGP to the host (FRR), per-VM rate limits
+- Edge kit: IX.br, RPKI, FastNetMon → RTBH/Flowspec
+
+**Firewall**
+- Per-VM firewall, stateless by default, same API in both modes, nftables or OVN ACLs underneath, deny logging
+
+**Graphs & accounting**
+- 10 s per-VM network graphs, 5-min traffic accounting, 95th-percentile billing
+- Prometheus metrics, VictoriaMetrics storage
 
 **Storage**
-- Local file (qcow2), LVM / LVM-thin, ZFS, Ceph RBD
-- Disk I/O limits (IOPS / throughput)
+- Local NVMe on LVM-thin (default), Ceph RBD volumes
+- Incremental, deduplicated backups to S3; PBS as a target
 
-**Hosting panel**
-- Admin, reseller and end-user roles
-- Plans / packages, hypervisor groups, placement rules
-- Browser console (noVNC / xterm.js serial)
-- Usage graphs (CPU, RAM, disk, net)
-- SSH keys, password reset, OS reinstall from portal
-
-**Integrations**
-- REST API + OpenAPI spec, API tokens with scopes
-- WHMCS, Blesta, Paymenter modules
-- Webhooks, Prometheus metrics, audit log
+**Business**
+- Admin, reseller and customer roles; plans with traffic quotas
+- WHMCS first, then Blesta and Paymenter
+- Hourly billing with credit balance and auto-suspend
+- REST API + OpenAPI, scoped tokens, webhooks, audit log
 
 ## Quick start
 
@@ -113,13 +118,15 @@ karen-agent enroll https://panel.example.com --token <one-time-token>
 apps/web/              # UI (SPA, embedded in karen-control)
 crates/karen-control/  # control plane binary
 crates/karen-agent/    # hypervisor agent binary
+crates/karen-metal/    # bare-metal provisioner binary
+crates/karen-edge/     # Pingora L7 edge for web hosting
 crates/karen-cli/      # admin CLI
 crates/karen-proto/    # gRPC/protobuf contracts
 crates/karen-core/     # domain types, scheduler, IPAM
-plugins/storage/*      # local, lvm, zfs, ceph
-plugins/network/*      # bridge, routed, vlan
+plugins/storage/*      # lvm-thin, ceph
+plugins/network/*      # routed, ovn
 plugins/billing/*      # whmcs, blesta, paymenter bridges
-docs/
+docs/                  # ARCHITECTURE.md, research/
 ```
 
 ## Contributing
